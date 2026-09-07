@@ -1,0 +1,6 @@
+{
+  "name": "ECONOM-IA",
+  "description": "La aplicación que ayuda a las familias argentinas a ahorrar dinero en cada compra.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
