@@ -1,26 +1,32 @@
-import React, { useState, useEffect } from 'react';
-import Navbar from './components/Navbar';
-import CopilotWidget from './components/CopilotWidget';
-import ChatCopilot from './components/ChatCopilot';
-import InflationCalculator from './components/InflationCalculator';
-import PriceComparator from './components/PriceComparator';
-import TicketScanner from './components/TicketScanner';
-import CommunityWaze from './components/CommunityWaze';
-import EconomicMap from './components/EconomicMap';
-import UserProfileModal from './components/UserProfileModal';
-import EconomicTwin from './components/EconomicTwin';
-import ExecutiveDossier from './components/ExecutiveDossier';
-import SmartShoppingList from './components/SmartShoppingList';
-import NeighborhoodIndex from './components/NeighborhoodIndex';
-import RetireeModeView from './components/RetireeModeView';
+import React, { useState } from 'react';
+import Navbar from './components/layout/Navbar';
+import CopilotWidget from './features/ai-advisor/CopilotWidget';
+import ChatCopilot from './features/ai-advisor/ChatCopilot';
+import InflationCalculator from './features/transactions/InflationCalculator';
+import PriceComparator from './features/transactions/PriceComparator';
+import TicketScanner from './features/transactions/TicketScanner';
+import CommunityWaze from './features/transactions/CommunityWaze';
+import EconomicMap from './features/dashboard/EconomicMap';
+import UserProfileModal from './components/ui/UserProfileModal';
+import EconomicTwin from './features/ai-advisor/EconomicTwin';
+import ExecutiveDossier from './features/dashboard/ExecutiveDossier';
+import SmartShoppingList from './features/transactions/SmartShoppingList';
+import NeighborhoodIndex from './features/dashboard/NeighborhoodIndex';
+import RetireeModeView from './features/dashboard/RetireeModeView';
 
-import { 
-  INITIAL_USER_PROFILE, 
-  PRODUCTS_CATALOG, 
-  RECENT_SCANNED_TICKETS, 
-  INFLATION_BENCHMARK 
+import {
+  INITIAL_USER_PROFILE,
+  PRODUCTS_CATALOG,
+  RECENT_SCANNED_TICKETS,
+  INFLATION_BENCHMARK
 } from './data/mockData';
-import { Bot, Sparkles, MessageCircle, X } from 'lucide-react';
+import {
+  getRecentTickets,
+  getUserProfile,
+  saveRecentTickets,
+  saveUserProfile
+} from './services/storage';
+import { Bot } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('lista');
@@ -28,26 +34,14 @@ export default function App() {
   const [isRetireeMode, setIsRetireeMode] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [chatPrompt, setChatPrompt] = useState('');
-  const [showFloatingBubble, setShowFloatingBubble] = useState(false);
 
-  // Local storage state with initial fallbacks
-  const [userProfile, setUserProfile] = useState(() => {
-    const saved = localStorage.getItem('economia_user_profile');
-    return saved ? JSON.parse(saved) : INITIAL_USER_PROFILE;
-  });
+  const [userProfile, setUserProfile] = useState(() =>
+    getUserProfile(INITIAL_USER_PROFILE)
+  );
 
-  const [recentTickets, setRecentTickets] = useState(() => {
-    const saved = localStorage.getItem('economia_tickets');
-    return saved ? JSON.parse(saved) : RECENT_SCANNED_TICKETS;
-  });
-
-  useEffect(() => {
-    localStorage.setItem('economia_user_profile', JSON.stringify(userProfile));
-  }, [userProfile]);
-
-  useEffect(() => {
-    localStorage.setItem('economia_tickets', JSON.stringify(recentTickets));
-  }, [recentTickets]);
+  const [recentTickets, setRecentTickets] = useState(() =>
+    getRecentTickets(RECENT_SCANNED_TICKETS)
+  );
 
   const handleAskCopilot = (promptText) => {
     setChatPrompt(promptText);
@@ -55,12 +49,20 @@ export default function App() {
   };
 
   const handleAddScannedTicket = (ticket) => {
-    setRecentTickets(prev => [ticket, ...prev]);
+    setRecentTickets((previousTickets) => {
+      const nextTickets = [ticket, ...previousTickets];
+      saveRecentTickets(nextTickets);
+      return nextTickets;
+    });
+  };
+
+  const handleSaveProfile = (updatedProfile) => {
+    saveUserProfile(updatedProfile);
+    setUserProfile(updatedProfile);
   };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-sky-500/30 selection:text-sky-200">
-      {/* Top Navigation */}
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -72,12 +74,9 @@ export default function App() {
         setIsRetireeMode={setIsRetireeMode}
       />
 
-      {/* Main Content Area: Responsive Container or Mobile Android Frame */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-3 sm:p-6 flex flex-col justify-start">
         {isMobileFrame ? (
-          /* Mobile Android Frame Simulator */
           <div className="mx-auto w-full max-w-[420px] rounded-[36px] p-3 bg-gradient-to-b from-slate-800 via-slate-900 to-slate-950 border-4 border-slate-700 shadow-2xl shadow-sky-950/40 relative overflow-hidden my-2">
-            {/* Speaker & camera pill */}
             <div className="flex justify-center mb-2">
               <div className="w-20 h-4 bg-slate-950 rounded-full flex items-center justify-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-slate-800" />
@@ -85,25 +84,21 @@ export default function App() {
               </div>
             </div>
 
-            {/* Screen Content */}
             <div className="rounded-[26px] bg-slate-950 min-h-[640px] max-h-[750px] overflow-y-auto no-scrollbar p-3.5 border border-slate-850">
               {renderTabContent()}
             </div>
 
-            {/* Android Navigation Bar gesture pill */}
             <div className="flex justify-center mt-2 py-1">
               <div className="w-28 h-1 rounded-full bg-slate-600/70" />
             </div>
           </div>
         ) : (
-          /* Full Wide Responsive View */
           <div className="w-full">
             {renderTabContent()}
           </div>
         )}
       </main>
 
-      {/* Footer */}
       <footer className="border-t border-slate-900 bg-slate-950/80 py-4 px-4 text-center text-xs text-slate-500">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
           <div className="flex items-center gap-1.5">
@@ -122,15 +117,13 @@ export default function App() {
         </div>
       </footer>
 
-      {/* Profile & Settings Modal */}
       <UserProfileModal
         isOpen={isProfileOpen}
         onClose={() => setIsProfileOpen(false)}
         userProfile={userProfile}
-        onSaveProfile={(updated) => setUserProfile(updated)}
+        onSaveProfile={handleSaveProfile}
       />
 
-      {/* Modo Burbuja Floating Trigger (From Prompt Specification) */}
       {activeTab !== 'chat' && (
         <div className="fixed bottom-5 right-5 z-40">
           <button
