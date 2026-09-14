@@ -13,7 +13,7 @@ import {
   Volume2,
   VolumeX,
 } from 'lucide-react';
-import { askEconomicCopilot } from '../../services/ai/aiCopilot';
+import { askEconomicCopilot, AiApiError } from '../../services/ai/aiCopilot';
 import UpgradeBanner from '../../components/ui/UpgradeBanner';
 import { useSubscription } from '../../hooks/useSubscription';
 
@@ -35,9 +35,13 @@ export default function ChatCopilot({
   const [isListening, setIsListening] = useState(false);
   const [speakingId, setSpeakingId] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
+  const [serverQuotaExceeded, setServerQuotaExceeded] = useState(false);
   const messagesEndRef = useRef(null);
   const requestInFlightRef = useRef(false);
   const { isPro, remainingQueries, limitReached, consumeAiQuery } = useSubscription();
+
+  const effectiveLimitReached = limitReached || serverQuotaExceeded;
+  const effectiveRemainingQueries = serverQuotaExceeded ? 0 : remainingQueries;
 
   const quickPrompts = [
     { label: '¿Estoy gastando demasiado?', query: '¿Estoy gastando demasiado en gastos fijos?' },
@@ -60,7 +64,12 @@ export default function ChatCopilot({
   const handleSendMessage = async (customText = null) => {
     const textToSend = String(customText ?? inputText).trim();
 
-    if (!textToSend || isLoading || requestInFlightRef.current || limitReached) {
+    if (
+      !textToSend ||
+      isLoading ||
+      requestInFlightRef.current ||
+      effectiveLimitReached
+    ) {
       return;
     }
 
@@ -100,12 +109,22 @@ export default function ChatCopilot({
       }
     } catch (error) {
       console.error(error);
+
+      if (error instanceof AiApiError && error.code === 'AI_QUOTA_EXCEEDED') {
+        setServerQuotaExceeded(true);
+      }
+
       setMessages((current) => [
         ...current,
         {
           id: `err_${Date.now()}`,
           role: 'assistant',
-          text: 'Hubo un error al consultar el asistente. Probá nuevamente en unos segundos.',
+          text:
+            error instanceof AiApiError && error.code === 'AUTH_REQUIRED'
+              ? 'Tu sesión expiró. Iniciá sesión nuevamente para continuar.'
+              : error instanceof AiApiError && error.code === 'AI_QUOTA_EXCEEDED'
+                ? 'Alcanzaste el límite mensual de consultas Free. Revisá los planes Pro para continuar.'
+                : 'Hubo un error al consultar el asistente. Probá nuevamente en unos segundos.',
           timestamp: new Date(),
         },
       ]);
@@ -146,7 +165,7 @@ export default function ChatCopilot({
   };
 
   const toggleMic = () => {
-    if (limitReached) return;
+    if (effectiveLimitReached || isLoading) return;
 
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
       setIsListening(true);
@@ -193,7 +212,7 @@ export default function ChatCopilot({
 
   const usageLabel = isPro
     ? 'Plan Pro · IA sin límite'
-    : `Plan Free · ${remainingQueries} consulta${remainingQueries === 1 ? '' : 's'} restante${remainingQueries === 1 ? '' : 's'}`;
+    : `Plan Free · ${effectiveRemainingQueries} consulta${effectiveRemainingQueries === 1 ? '' : 's'} restante${effectiveRemainingQueries === 1 ? '' : 's'}`;
 
   return (
     <div className="flex h-[calc(100vh-140px)] min-h-[500px] flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/90 shadow-xl">
@@ -217,7 +236,7 @@ export default function ChatCopilot({
         </div>
       </div>
 
-      {!isPro && <UpgradeBanner remainingQueries={remainingQueries} />}
+      {!isPro && <UpgradeBanner remainingQueries={effectiveRemainingQueries} />}
 
       <div className="flex-1 space-y-4 overflow-y-auto p-4">
         {messages.map((msg) => {
@@ -285,7 +304,7 @@ export default function ChatCopilot({
       <div className="border-t border-slate-800/80 bg-slate-950/40 px-4 py-2">
         <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
           {quickPrompts.map((item) => (
-            <button key={item.query} type="button" onClick={() => handleSendMessage(item.query)} disabled={isLoading || limitReached} className="whitespace-nowrap rounded-full border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs text-slate-300 transition hover:border-sky-500/40 hover:bg-sky-500/20 hover:text-sky-200 disabled:cursor-not-allowed disabled:opacity-40">
+            <button key={item.query} type="button" onClick={() => handleSendMessage(item.query)} disabled={isLoading || effectiveLimitReached} className="whitespace-nowrap rounded-full border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs text-slate-300 transition hover:border-sky-500/40 hover:bg-sky-500/20 hover:text-sky-200 disabled:cursor-not-allowed disabled:opacity-40">
               {item.label}
             </button>
           ))}
@@ -293,14 +312,14 @@ export default function ChatCopilot({
       </div>
 
       <form onSubmit={(event) => { event.preventDefault(); handleSendMessage(); }} className="flex items-center gap-2 border-t border-slate-800 bg-slate-950 p-3">
-        <button type="button" onClick={toggleMic} disabled={limitReached || isLoading} className={`rounded-xl border p-2.5 transition ${isListening ? 'animate-pulse border-rose-500 bg-rose-500/20 text-rose-400' : 'border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-700 hover:text-white'} disabled:cursor-not-allowed disabled:opacity-40`} title={isListening ? 'Escuchando...' : 'Hablar por micrófono'}>
+        <button type="button" onClick={toggleMic} disabled={effectiveLimitReached || isLoading} className={`rounded-xl border p-2.5 transition ${isListening ? 'animate-pulse border-rose-500 bg-rose-500/20 text-rose-400' : 'border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-700 hover:text-white'} disabled:cursor-not-allowed disabled:opacity-40`} title={isListening ? 'Escuchando...' : 'Hablar por micrófono'}>
           {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
         </button>
 
-        <input type="text" value={inputText} onChange={(event) => setInputText(event.target.value)} disabled={limitReached || isLoading} placeholder={limitReached ? 'Límite Free alcanzado · revisá los planes Pro' : 'Consultá precios, sueldo, cuotas o inflación...'} className="flex-1 rounded-xl border border-slate-800 bg-slate-900 px-4 py-2.5 text-xs text-white outline-none transition placeholder:text-slate-500 focus:border-sky-500 disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm" />
+        <input type="text" value={inputText} onChange={(event) => setInputText(event.target.value)} disabled={effectiveLimitReached || isLoading} placeholder={effectiveLimitReached ? 'Límite Free alcanzado · revisá los planes Pro' : 'Consultá precios, sueldo, cuotas o inflación...'} className="flex-1 rounded-xl border border-slate-800 bg-slate-900 px-4 py-2.5 text-xs text-white outline-none transition placeholder:text-slate-500 focus:border-sky-500 disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm" />
 
-        <button type="submit" disabled={!inputText.trim() || isLoading || limitReached} className="rounded-xl bg-gradient-to-r from-sky-500 to-cyan-500 p-2.5 font-bold text-slate-950 shadow-md shadow-sky-500/20 transition hover:from-sky-400 hover:to-cyan-400 disabled:cursor-not-allowed disabled:opacity-40" title={limitReached ? 'Ver planes Pro para continuar' : 'Enviar consulta'}>
-          {limitReached ? <Crown className="h-4 w-4" /> : <Send className="h-4 w-4" />}
+        <button type="submit" disabled={!inputText.trim() || isLoading || effectiveLimitReached} className="rounded-xl bg-gradient-to-r from-sky-500 to-cyan-500 p-2.5 font-bold text-slate-950 shadow-md shadow-sky-500/20 transition hover:from-sky-400 hover:to-cyan-400 disabled:cursor-not-allowed disabled:opacity-40" title={effectiveLimitReached ? 'Ver planes Pro para continuar' : 'Enviar consulta'}>
+          {effectiveLimitReached ? <Crown className="h-4 w-4" /> : <Send className="h-4 w-4" />}
         </button>
       </form>
     </div>
