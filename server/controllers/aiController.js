@@ -6,6 +6,7 @@ const openai = new OpenAI({
 });
 
 const MODEL = process.env.OPENAI_MODEL || 'gpt-5.5';
+const APP_TIMEZONE = process.env.APP_TIMEZONE || 'America/Argentina/Buenos_Aires';
 const MAX_PROMPT_LENGTH = 4000;
 const MAX_HISTORY_MESSAGES = 12;
 const MAX_HISTORY_MESSAGE_LENGTH = 2000;
@@ -13,8 +14,16 @@ const MAX_HISTORY_TOTAL_LENGTH = 12000;
 const MAX_FINANCIAL_NUMBER = 9_999_999_999_999;
 
 function getCurrentUsageMonth() {
-  const now = new Date();
-  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: APP_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+  }).formatToParts(new Date());
+
+  const year = parts.find((part) => part.type === 'year')?.value;
+  const month = parts.find((part) => part.type === 'month')?.value;
+
+  return `${year}-${month}`;
 }
 
 function parseFinancialSummary(input) {
@@ -142,9 +151,7 @@ export async function aiController(req, res) {
       throw new Error('EMPTY_LLM_RESPONSE');
     }
 
-    return res.status(200).json({
-      text,
-    });
+    return res.status(200).json({ text });
   } catch (error) {
     if (error?.message === 'INVALID_PROMPT') {
       return res.status(400).json({
