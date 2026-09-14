@@ -1,4 +1,15 @@
+import { getSupabaseClient } from '../supabase/client';
+
 const DEFAULT_AI_ENDPOINT = '/api/ai';
+
+export class AiApiError extends Error {
+  constructor(code, message, status) {
+    super(message);
+    this.name = 'AiApiError';
+    this.code = code;
+    this.status = status;
+  }
+}
 
 function toFiniteNumber(value, fallback = 0) {
   const number = Number(value);
@@ -6,9 +17,11 @@ function toFiniteNumber(value, fallback = 0) {
 }
 
 function buildFinancialSummary(userProfile) {
-  const sueldo = toFiniteNumber(userProfile?.sueldoNeto);
-  const extras = toFiniteNumber(userProfile?.ingresosExtra);
-  const income = Math.max(0, sueldo + extras);
+  const income = Math.max(
+    0,
+    toFiniteNumber(userProfile?.sueldoNeto) +
+      toFiniteNumber(userProfile?.ingresosExtra),
+  );
 
   const expenses = Math.max(
     0,
@@ -20,10 +33,7 @@ function buildFinancialSummary(userProfile) {
       toFiniteNumber(userProfile?.gastoSupermercadoMensual),
   );
 
-  return {
-    income,
-    expenses,
-  };
+  return { income, expenses };
 }
 
 function sanitizeChatHistory(chatHistory) {
@@ -38,7 +48,7 @@ function sanitizeChatHistory(chatHistory) {
         .slice(-12)
         .map(({ role, text }) => ({
           role,
-          text: text.slice(0, 4000),
+          text: text.slice(0, 2000),
         }))
     : [];
 }
@@ -47,13 +57,54 @@ function getAiEndpoint() {
   return import.meta.env.VITE_AI_API_URL || DEFAULT_AI_ENDPOINT;
 }
 
-async function requestBackendAi({ prompt, financialSummary, chatHistory }) {
-  const endpoint = getAiEndpoint();
+async function handleAuthenticationFailure(supabase, code, message, status) {
+  try {
+    await supabase.auth.signOut();
+  } catch (signOutError) {
+    console.warn('[ai] Unable to clear expired Supabase session.', signOutError);
+  }
 
-  const response = await fetch(endpoint, {
+  window.dispatchEvent(
+    new CustomEvent('economia:auth-required', {
+      detail: { code, message, status },
+    }),
+  );
+
+  throw new AiApiError(code, message, status);
+}
+
+async function requestBackendAi({ prompt, financialSummary, chatHistory }) {
+  let supabase;
+
+  try {
+    supabase = getSupabaseClient();
+  } catch {
+    throw new AiApiError(
+      'SUPABASE_AUTH_NOT_CONFIGURED',
+      'Supabase Auth is not configured.',
+      503,
+    );
+  }
+
+  const {
+    data: { session },
+    error: sessionError,
+  } = await supabase.auth.getSession();
+
+  if (sessionError || !session?.access_token) {
+    return handleAuthenticationFailure(
+      supabase,
+      'AUTH_REQUIRED',
+      'Your session is missing or expired.',
+      401,
+    );
+  }
+
+  const response = await fetch(getAiEndpoint(), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.access_token}`,
     },
     credentials: 'include',
     body: JSON.stringify({
@@ -63,17 +114,52 @@ async function requestBackendAi({ prompt, financialSummary, chatHistory }) {
     }),
   });
 
-  if (!response.ok) {
-    const error = new Error(`AI backend request failed with status ${response.status}`);
-    error.status = response.status;
-    throw error;
+  let data = null;
+  try {
+    data = await response.json();
+  } catch {
+    data = null;
   }
 
-  const data = await response.json();
+  if (response.status === 401) {
+    return handleAuthenticationFailure(
+      supabase,
+      data?.error || 'AUTH_INVALID',
+      data?.message || 'Your session is invalid or expired.',
+      401,
+    );
+  }
+
+  if (response.status === 403 && data?.error === 'AI_QUOTA_EXCEEDED') {
+    window.dispatchEvent(
+      new CustomEvent('economia:upgrade-required', {
+        detail: { code: 'AI_QUOTA_EXCEEDED', status: 403 },
+      }),
+    );
+
+    throw new AiApiError(
+      'AI_QUOTA_EXCEEDED',
+      'The monthly AI quota has been reached.',
+      403,
+    );
+  }
+
+  if (!response.ok) {
+    throw new AiApiError(
+      data?.error || 'AI_REQUEST_FAILED',
+      data?.message || `AI backend request failed with status ${response.status}.`,
+      response.status,
+    );
+  }
+
   const text = data?.text || data?.message || data?.answer;
 
   if (!text || typeof text !== 'string') {
-    throw new Error('AI backend returned an invalid response');
+    throw new AiApiError(
+      'INVALID_AI_RESPONSE',
+      'AI backend returned an invalid response.',
+      502,
+    );
   }
 
   return text;
@@ -87,7 +173,7 @@ export async function askEconomicCopilot({
   const normalizedPrompt = String(prompt ?? '').trim();
 
   if (!normalizedPrompt) {
-    throw new Error('AI prompt is required.');
+    throw new AiApiError('INVALID_PROMPT', 'AI prompt is required.', 400);
   }
 
   const financialSummary = buildFinancialSummary(userProfile);
