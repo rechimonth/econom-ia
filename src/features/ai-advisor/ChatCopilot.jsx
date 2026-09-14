@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Bot,
   Check,
@@ -19,9 +19,7 @@ import { useSubscription } from '../../hooks/useSubscription';
 
 export default function ChatCopilot({
   userProfile,
-  productsCatalog,
   recentTickets,
-  inflationData,
   initialPrompt = '',
 }) {
   const [messages, setMessages] = useState([
@@ -38,7 +36,8 @@ export default function ChatCopilot({
   const [speakingId, setSpeakingId] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
   const messagesEndRef = useRef(null);
-  const { plan, isPro, remainingQueries, limitReached, consumeAiQuery, upgradeToPro } = useSubscription();
+  const requestInFlightRef = useRef(false);
+  const { isPro, remainingQueries, limitReached, consumeAiQuery } = useSubscription();
 
   const quickPrompts = [
     { label: '¿Estoy gastando demasiado?', query: '¿Estoy gastando demasiado en gastos fijos?' },
@@ -48,11 +47,11 @@ export default function ChatCopilot({
     { label: 'Chino vs mayorista', query: '¿Qué productos conviene comprar en el chino y cuáles en el mayorista?' },
   ];
 
-  useEffect(() => {
+  React.useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading]);
 
-  useEffect(() => {
+  React.useEffect(() => {
     if (initialPrompt && initialPrompt.trim()) {
       handleSendMessage(initialPrompt);
     }
@@ -60,12 +59,14 @@ export default function ChatCopilot({
 
   const handleSendMessage = async (customText = null) => {
     const textToSend = String(customText ?? inputText).trim();
-    if (!textToSend || isLoading) return;
 
-    if (!consumeAiQuery()) {
-      setInputText('');
+    if (!textToSend || isLoading || requestInFlightRef.current || limitReached) {
       return;
     }
+
+    requestInFlightRef.current = true;
+    setInputText('');
+    setIsLoading(true);
 
     const userMessage = {
       id: `user_${Date.now()}`,
@@ -75,16 +76,12 @@ export default function ChatCopilot({
     };
 
     setMessages((current) => [...current, userMessage]);
-    setInputText('');
-    setIsLoading(true);
 
     try {
       const replyText = await askEconomicCopilot({
         prompt: textToSend,
         userProfile,
-        productsCatalog,
         recentTickets,
-        inflationData,
         chatHistory: messages,
       });
 
@@ -97,6 +94,10 @@ export default function ChatCopilot({
           timestamp: new Date(),
         },
       ]);
+
+      if (!consumeAiQuery()) {
+        console.warn('[subscription] AI response succeeded, but local usage state rejected the consumption.');
+      }
     } catch (error) {
       console.error(error);
       setMessages((current) => [
@@ -109,6 +110,7 @@ export default function ChatCopilot({
         },
       ]);
     } finally {
+      requestInFlightRef.current = false;
       setIsLoading(false);
     }
   };
@@ -125,6 +127,7 @@ export default function ChatCopilot({
 
   const handleSpeak = (id, text) => {
     if (!('speechSynthesis' in window)) return;
+
     if (speakingId === id) {
       window.speechSynthesis.cancel();
       setSpeakingId(null);
@@ -143,6 +146,8 @@ export default function ChatCopilot({
   };
 
   const toggleMic = () => {
+    if (limitReached) return;
+
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
       setIsListening(true);
       window.setTimeout(() => {
@@ -203,24 +208,16 @@ export default function ChatCopilot({
                 <span className="text-sm font-bold text-white">ECONOM-IA Copiloto</span>
                 <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
               </div>
-              <p className="text-[10px] text-slate-400">
-                Contexto activo: {userProfile.ciudad} · {usageLabel}
-              </p>
+              <p className="text-[10px] text-slate-400">Contexto activo: {userProfile.ciudad} · {usageLabel}</p>
             </div>
           </div>
-
-          <button
-            type="button"
-            onClick={resetChat}
-            className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-800 hover:text-slate-200"
-            title="Reiniciar conversación"
-          >
+          <button type="button" onClick={resetChat} className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-800 hover:text-slate-200" title="Reiniciar conversación">
             <RefreshCw className="h-4 w-4" />
           </button>
         </div>
       </div>
 
-      {!isPro && <UpgradeBanner remainingQueries={remainingQueries} onUpgrade={upgradeToPro} />}
+      {!isPro && <UpgradeBanner remainingQueries={remainingQueries} />}
 
       <div className="flex-1 space-y-4 overflow-y-auto p-4">
         {messages.map((msg) => {
@@ -288,51 +285,21 @@ export default function ChatCopilot({
       <div className="border-t border-slate-800/80 bg-slate-950/40 px-4 py-2">
         <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
           {quickPrompts.map((item) => (
-            <button
-              key={item.query}
-              type="button"
-              onClick={() => handleSendMessage(item.query)}
-              disabled={isLoading || limitReached}
-              className="whitespace-nowrap rounded-full border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs text-slate-300 transition hover:border-sky-500/40 hover:bg-sky-500/20 hover:text-sky-200 disabled:cursor-not-allowed disabled:opacity-40"
-            >
+            <button key={item.query} type="button" onClick={() => handleSendMessage(item.query)} disabled={isLoading || limitReached} className="whitespace-nowrap rounded-full border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs text-slate-300 transition hover:border-sky-500/40 hover:bg-sky-500/20 hover:text-sky-200 disabled:cursor-not-allowed disabled:opacity-40">
               {item.label}
             </button>
           ))}
         </div>
       </div>
 
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          handleSendMessage();
-        }}
-        className="flex items-center gap-2 border-t border-slate-800 bg-slate-950 p-3"
-      >
-        <button
-          type="button"
-          onClick={toggleMic}
-          disabled={limitReached}
-          className={`rounded-xl border p-2.5 transition ${isListening ? 'animate-pulse border-rose-500 bg-rose-500/20 text-rose-400' : 'border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-700 hover:text-white'} disabled:cursor-not-allowed disabled:opacity-40`}
-          title={isListening ? 'Escuchando...' : 'Hablar por micrófono'}
-        >
+      <form onSubmit={(event) => { event.preventDefault(); handleSendMessage(); }} className="flex items-center gap-2 border-t border-slate-800 bg-slate-950 p-3">
+        <button type="button" onClick={toggleMic} disabled={limitReached || isLoading} className={`rounded-xl border p-2.5 transition ${isListening ? 'animate-pulse border-rose-500 bg-rose-500/20 text-rose-400' : 'border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-700 hover:text-white'} disabled:cursor-not-allowed disabled:opacity-40`} title={isListening ? 'Escuchando...' : 'Hablar por micrófono'}>
           {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
         </button>
 
-        <input
-          type="text"
-          value={inputText}
-          onChange={(event) => setInputText(event.target.value)}
-          disabled={limitReached}
-          placeholder={limitReached ? 'Límite Free alcanzado · hacé Upgrade para continuar' : 'Consultá precios, sueldo, cuotas o inflación...'}
-          className="flex-1 rounded-xl border border-slate-800 bg-slate-900 px-4 py-2.5 text-xs text-white outline-none transition placeholder:text-slate-500 focus:border-sky-500 disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm"
-        />
+        <input type="text" value={inputText} onChange={(event) => setInputText(event.target.value)} disabled={limitReached || isLoading} placeholder={limitReached ? 'Límite Free alcanzado · revisá los planes Pro' : 'Consultá precios, sueldo, cuotas o inflación...'} className="flex-1 rounded-xl border border-slate-800 bg-slate-900 px-4 py-2.5 text-xs text-white outline-none transition placeholder:text-slate-500 focus:border-sky-500 disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm" />
 
-        <button
-          type="submit"
-          disabled={!inputText.trim() || isLoading || limitReached}
-          className="rounded-xl bg-gradient-to-r from-sky-500 to-cyan-500 p-2.5 font-bold text-slate-950 shadow-md shadow-sky-500/20 transition hover:from-sky-400 hover:to-cyan-400 disabled:cursor-not-allowed disabled:opacity-40"
-          title={limitReached ? 'Upgrade a Pro para continuar' : 'Enviar consulta'}
-        >
+        <button type="submit" disabled={!inputText.trim() || isLoading || limitReached} className="rounded-xl bg-gradient-to-r from-sky-500 to-cyan-500 p-2.5 font-bold text-slate-950 shadow-md shadow-sky-500/20 transition hover:from-sky-400 hover:to-cyan-400 disabled:cursor-not-allowed disabled:opacity-40" title={limitReached ? 'Ver planes Pro para continuar' : 'Enviar consulta'}>
           {limitReached ? <Crown className="h-4 w-4" /> : <Send className="h-4 w-4" />}
         </button>
       </form>

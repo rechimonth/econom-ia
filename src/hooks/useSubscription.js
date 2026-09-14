@@ -1,91 +1,106 @@
 import { useCallback, useMemo, useState } from 'react';
 
 const STORAGE_KEY = 'economia_subscription';
-const FREE_LIMIT = 3;
+export const FREE_LIMIT = 3;
 
 function getCurrentMonthKey() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
 
-function readState() {
-  if (typeof window === 'undefined') {
-    return { plan: 'Free', usageMonth: getCurrentMonthKey(), aiQueries: 0 };
+function createDefaultState() {
+  return {
+    plan: 'Free',
+    usageMonth: getCurrentMonthKey(),
+    aiQueries: 0,
+  };
+}
+
+function sanitizeState(input) {
+  const currentMonth = getCurrentMonthKey();
+  const plan = input?.plan === 'Pro' ? 'Pro' : 'Free';
+  const usageMonth = typeof input?.usageMonth === 'string' ? input.usageMonth : currentMonth;
+  const parsedQueries = Number(input?.aiQueries);
+  const aiQueries = Number.isInteger(parsedQueries) && parsedQueries >= 0 ? parsedQueries : 0;
+
+  if (usageMonth !== currentMonth) {
+    return {
+      plan,
+      usageMonth: currentMonth,
+      aiQueries: 0,
+    };
   }
+
+  return {
+    plan,
+    usageMonth,
+    aiQueries,
+  };
+}
+
+function readState() {
+  if (typeof window === 'undefined') return createDefaultState();
 
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : {};
-    const usageMonth = getCurrentMonthKey();
-
-    if (parsed.usageMonth !== usageMonth) {
-      return { plan: parsed.plan === 'Pro' ? 'Pro' : 'Free', usageMonth, aiQueries: 0 };
-    }
-
-    return {
-      plan: parsed.plan === 'Pro' ? 'Pro' : 'Free',
-      usageMonth,
-      aiQueries: Number.isInteger(parsed.aiQueries) && parsed.aiQueries >= 0 ? parsed.aiQueries : 0,
-    };
+    if (!raw) return createDefaultState();
+    return sanitizeState(JSON.parse(raw));
   } catch (error) {
     console.warn('[subscription] Unable to read subscription state.', error);
-    return { plan: 'Free', usageMonth, aiQueries: 0 };
+    return createDefaultState();
   }
 }
 
 function persistState(state) {
   if (typeof window === 'undefined') return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (error) {
+    console.warn('[subscription] Unable to persist subscription state.', error);
+  }
 }
 
 export function useSubscription() {
   const [state, setState] = useState(readState);
-
   const isPro = state.plan === 'Pro';
   const remainingQueries = isPro ? Infinity : Math.max(0, FREE_LIMIT - state.aiQueries);
   const limitReached = !isPro && state.aiQueries >= FREE_LIMIT;
 
   const consumeAiQuery = useCallback(() => {
-    setState((current) => {
-      const normalizedMonth = getCurrentMonthKey();
-      const base = current.usageMonth === normalizedMonth
-        ? current
-        : { ...current, usageMonth: normalizedMonth, aiQueries: 0 };
+    let consumed = false;
 
-      if (base.plan !== 'Pro' && base.aiQueries >= FREE_LIMIT) {
-        return base;
+    setState((current) => {
+      const normalized = sanitizeState(current);
+
+      if (normalized.plan !== 'Pro' && normalized.aiQueries >= FREE_LIMIT) {
+        return normalized;
       }
 
+      consumed = true;
+
       const next = {
-        ...base,
-        aiQueries: base.plan === 'Pro' ? base.aiQueries : base.aiQueries + 1,
+        ...normalized,
+        aiQueries: normalized.plan === 'Pro' ? normalized.aiQueries : normalized.aiQueries + 1,
       };
 
       persistState(next);
       return next;
     });
 
-    return isPro || !limitReached;
-  }, [isPro, limitReached]);
-
-  const upgradeToPro = useCallback(() => {
-    setState((current) => {
-      const next = { ...current, plan: 'Pro' };
-      persistState(next);
-      return next;
-    });
+    return consumed;
   }, []);
 
-  return useMemo(() => ({
-    plan: state.plan,
-    isPro,
-    aiQueries: state.aiQueries,
-    aiLimit: isPro ? Infinity : FREE_LIMIT,
-    remainingQueries,
-    limitReached,
-    consumeAiQuery,
-    upgradeToPro,
-  }), [state.plan, state.aiQueries, isPro, remainingQueries, limitReached, consumeAiQuery, upgradeToPro]);
+  return useMemo(
+    () => ({
+      plan: state.plan,
+      isPro,
+      aiQueries: state.aiQueries,
+      aiLimit: isPro ? Infinity : FREE_LIMIT,
+      remainingQueries,
+      limitReached,
+      consumeAiQuery,
+    }),
+    [state.plan, state.aiQueries, isPro, remainingQueries, limitReached, consumeAiQuery],
+  );
 }
-
-export { FREE_LIMIT };
