@@ -53,7 +53,7 @@ La aplicación está diseñada para evolucionar desde un MVP local hacia una arq
 | Browser Local Storage | Persistencia local actual |
 | JavaScript / JSX | Código de aplicación |
 
-La configuración actual del proyecto define `npm run dev`, `npm run build` y `npm run preview`. fileciteturn52file0
+La configuración actual del proyecto define `npm run dev`, `npm run build` y `npm run preview`.
 
 ## Arquitectura
 
