@@ -12,7 +12,8 @@
     "local:start": "bash scripts/start-local.sh",
     "local:stop": "bash scripts/start-local.sh stop",
     "local:status": "bash scripts/start-local.sh status",
-    "supabase:deploy": "bash scripts/deploy-supabase.sh"
+    "supabase:deploy": "bash scripts/deploy-supabase.sh",
+    "supabase:migrate-api": "bash scripts/apply-migrations-via-api.sh"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",
