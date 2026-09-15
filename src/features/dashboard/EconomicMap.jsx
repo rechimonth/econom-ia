@@ -10,7 +10,7 @@ import {
   Compass,
   Layers
 } from 'lucide-react';
-import { ARGENTINE_ZONES } from '../data/mockData';
+import { ARGENTINE_ZONES } from '../../data/mockData';
 
 export default function EconomicMap({ userProfile, onAskCopilot, setActiveTab }) {
   const [selectedZoneId, setSelectedZoneId] = useState('monte_chingolo');

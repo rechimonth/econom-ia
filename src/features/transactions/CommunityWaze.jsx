@@ -13,7 +13,7 @@ import {
   Smartphone,
   ChevronRight
 } from 'lucide-react';
-import { COMMUNITY_PRICE_REPORTS } from '../data/mockData';
+import { COMMUNITY_PRICE_REPORTS } from '../../data/mockData';
 
 export default function CommunityWaze({ userProfile, onAskCopilot, setActiveTab }) {
   const [reports, setReports] = useState(COMMUNITY_PRICE_REPORTS);

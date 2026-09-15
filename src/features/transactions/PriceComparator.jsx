@@ -14,7 +14,7 @@ import {
   ArrowRight,
   ShieldCheck
 } from 'lucide-react';
-import { PRODUCTS_CATALOG } from '../data/mockData';
+import { PRODUCTS_CATALOG } from '../../data/mockData';
 
 export default function PriceComparator({ onAskCopilot, setActiveTab }) {
   const [selectedCategory, setSelectedCategory] = useState('Todos');

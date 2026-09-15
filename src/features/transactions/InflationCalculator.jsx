@@ -13,7 +13,7 @@ import {
   Sparkles,
   Layers
 } from 'lucide-react';
-import { INFLATION_BENCHMARK } from '../data/mockData';
+import { INFLATION_BENCHMARK } from '../../data/mockData';
 
 export default function InflationCalculator({ userProfile, onAskCopilot, setActiveTab }) {
   // User customized weights of monthly spending

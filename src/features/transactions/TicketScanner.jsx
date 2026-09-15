@@ -12,7 +12,7 @@ import {
   ArrowRight,
   FileText
 } from 'lucide-react';
-import { RECENT_SCANNED_TICKETS } from '../data/mockData';
+import { RECENT_SCANNED_TICKETS } from '../../data/mockData';
 import confetti from 'canvas-confetti';
 
 export default function TicketScanner({ onAddTicket, onAskCopilot, setActiveTab }) {

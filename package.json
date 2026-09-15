@@ -8,7 +8,11 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "server:dev": "npm --prefix server run dev",
-    "server:start": "npm --prefix server run start"
+    "server:start": "npm --prefix server run start",
+    "local:start": "bash scripts/start-local.sh",
+    "local:stop": "bash scripts/start-local.sh stop",
+    "local:status": "bash scripts/start-local.sh status",
+    "supabase:deploy": "bash scripts/deploy-supabase.sh"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",

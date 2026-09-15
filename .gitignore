@@ -19,3 +19,6 @@ debug.keystore
 node_modules/
 dist/
 .vite/
+
+# Supabase CLI local link state
+supabase/.temp/
