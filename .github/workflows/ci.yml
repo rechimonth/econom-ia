@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Audit production dependencies
+        run: npm audit --audit-level=high
+      - name: Build frontend
+        run: npm run build
+
+  server:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - name: Install backend dependencies
+        run: npm ci
+      - name: Audit backend dependencies
+        run: npm audit --audit-level=high
+      - name: Syntax check backend
+        run: node --check server.js
+      - name: Syntax check controllers and services
+        shell: bash
+        run: |
+          find controllers services lib scripts -type f -name '*.js' -print0 \
+            | xargs -0 -n1 node --check
