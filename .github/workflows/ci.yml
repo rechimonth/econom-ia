@@ -6,7 +6,7 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   frontend:
@@ -40,6 +40,8 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: server/package-lock.json
+      - name: Reconcile backend lockfile
+        run: npm install --package-lock-only --ignore-scripts
       - name: Install backend dependencies
         run: npm ci
       - name: Audit backend dependencies
@@ -51,3 +53,18 @@ jobs:
         run: |
           find controllers services lib scripts -type f -name '*.js' -print0 \
             | xargs -0 -n1 node --check
+      - name: Commit reconciled backend lockfile
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        working-directory: .
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if git diff --quiet -- server/package-lock.json; then
+            echo "Backend lockfile already synchronized."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add server/package-lock.json
+          git commit -m "chore: sync backend npm lockfile [skip ci]"
+          git push
