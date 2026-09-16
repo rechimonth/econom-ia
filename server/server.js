@@ -6,6 +6,8 @@ import rateLimit from 'express-rate-limit';
 import { authMiddleware } from './middleware/authMiddleware.js';
 import { aiController } from './controllers/aiController.js';
 import { meController } from './controllers/meController.js';
+import { checkoutController, portalController, cancelController, resumeController } from './controllers/billingController.js';
+import { billingWebhookController } from './controllers/billingWebhookController.js';
 
 const app = express();
 const port = Number(process.env.PORT || 8787);
@@ -22,6 +24,7 @@ if (process.env.TRUST_PROXY === 'true') {
 }
 
 app.use(helmet());
+
 app.use(
   cors({
     origin(origin, callback) {
@@ -34,6 +37,7 @@ app.use(
   }),
 );
 
+app.post('/api/billing/webhook', express.raw({ type: 'application/json' }), billingWebhookController);
 app.use(express.json({ limit: '64kb' }));
 
 const ipLimiter = rateLimit({
@@ -53,6 +57,15 @@ const perUserAiLimiter = rateLimit({
   message: { error: 'AI_RATE_LIMITED', message: 'Too many AI requests. Please try again later.' },
 });
 
+const billingActionLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 12,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user_id,
+  message: { error: 'BILLING_RATE_LIMITED', message: 'Too many billing actions. Please try again later.' },
+});
+
 const healthLimiter = rateLimit({
   windowMs: 60_000,
   limit: 30,
@@ -67,6 +80,10 @@ app.get('/health', healthLimiter, (_req, res) => {
 
 app.get('/api/me', ipLimiter, authMiddleware, meController);
 app.post('/api/ai', ipLimiter, authMiddleware, perUserAiLimiter, aiController);
+app.post('/api/billing/checkout', ipLimiter, authMiddleware, billingActionLimiter, checkoutController);
+app.post('/api/billing/portal', ipLimiter, authMiddleware, billingActionLimiter, portalController);
+app.post('/api/billing/cancel', ipLimiter, authMiddleware, billingActionLimiter, cancelController);
+app.post('/api/billing/resume', ipLimiter, authMiddleware, billingActionLimiter, resumeController);
 
 app.use((error, _req, res, _next) => {
   if (error?.message === 'CORS_ORIGIN_NOT_ALLOWED') {
