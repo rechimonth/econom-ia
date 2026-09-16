@@ -22,14 +22,10 @@ if (process.env.TRUST_PROXY === 'true') {
 }
 
 app.use(helmet());
-
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-
+      if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
       return callback(new Error('CORS_ORIGIN_NOT_ALLOWED'));
     },
     methods: ['GET', 'POST', 'OPTIONS'],
@@ -45,10 +41,7 @@ const ipLimiter = rateLimit({
   limit: 60,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
-  message: {
-    error: 'RATE_LIMITED',
-    message: 'Too many requests. Please try again later.',
-  },
+  message: { error: 'RATE_LIMITED', message: 'Too many requests. Please try again later.' },
 });
 
 const perUserAiLimiter = rateLimit({
@@ -57,12 +50,7 @@ const perUserAiLimiter = rateLimit({
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   keyGenerator: (req) => req.user_id,
-  standardHeaders: 'draft-8',
-  legacyHeaders: false,
-  message: {
-    error: 'AI_RATE_LIMITED',
-    message: 'Too many AI requests. Please try again later.',
-  },
+  message: { error: 'AI_RATE_LIMITED', message: 'Too many AI requests. Please try again later.' },
 });
 
 const healthLimiter = rateLimit({
@@ -70,10 +58,7 @@ const healthLimiter = rateLimit({
   limit: 30,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
-  message: {
-    error: 'RATE_LIMITED',
-    message: 'Too many health checks.',
-  },
+  message: { error: 'RATE_LIMITED', message: 'Too many health checks.' },
 });
 
 app.get('/health', healthLimiter, (_req, res) => {
@@ -85,24 +70,15 @@ app.post('/api/ai', ipLimiter, authMiddleware, perUserAiLimiter, aiController);
 
 app.use((error, _req, res, _next) => {
   if (error?.message === 'CORS_ORIGIN_NOT_ALLOWED') {
-    return res.status(403).json({
-      error: 'CORS_ORIGIN_NOT_ALLOWED',
-      message: 'The request origin is not allowed.',
-    });
+    return res.status(403).json({ error: 'CORS_ORIGIN_NOT_ALLOWED', message: 'The request origin is not allowed.' });
   }
 
   if (error?.type === 'entity.too.large') {
-    return res.status(413).json({
-      error: 'REQUEST_TOO_LARGE',
-      message: 'Request payload is too large.',
-    });
+    return res.status(413).json({ error: 'REQUEST_TOO_LARGE', message: 'Request payload is too large.' });
   }
 
   console.error('[server] Unhandled error:', error);
-  return res.status(500).json({
-    error: 'INTERNAL_SERVER_ERROR',
-    message: 'An unexpected server error occurred.',
-  });
+  return res.status(500).json({ error: 'INTERNAL_SERVER_ERROR', message: 'An unexpected server error occurred.' });
 });
 
 app.listen(port, () => {
