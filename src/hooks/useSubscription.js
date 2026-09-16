@@ -1,106 +1,98 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { getSupabaseClient } from '../services/supabase/client';
 
-const STORAGE_KEY = 'economia_subscription';
 export const FREE_LIMIT = 3;
+export const PRO_LIMIT = 1000;
 
-function getCurrentMonthKey() {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-}
-
-function createDefaultState() {
-  return {
-    plan: 'Free',
-    usageMonth: getCurrentMonthKey(),
-    aiQueries: 0,
-  };
-}
-
-function sanitizeState(input) {
-  const currentMonth = getCurrentMonthKey();
-  const plan = input?.plan === 'Pro' ? 'Pro' : 'Free';
-  const usageMonth = typeof input?.usageMonth === 'string' ? input.usageMonth : currentMonth;
-  const parsedQueries = Number(input?.aiQueries);
-  const aiQueries = Number.isInteger(parsedQueries) && parsedQueries >= 0 ? parsedQueries : 0;
-
-  if (usageMonth !== currentMonth) {
-    return {
-      plan,
-      usageMonth: currentMonth,
-      aiQueries: 0,
-    };
-  }
-
-  return {
-    plan,
-    usageMonth,
-    aiQueries,
-  };
-}
-
-function readState() {
-  if (typeof window === 'undefined') return createDefaultState();
-
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return createDefaultState();
-    return sanitizeState(JSON.parse(raw));
-  } catch (error) {
-    console.warn('[subscription] Unable to read subscription state.', error);
-    return createDefaultState();
-  }
-}
-
-function persistState(state) {
-  if (typeof window === 'undefined') return;
-
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch (error) {
-    console.warn('[subscription] Unable to persist subscription state.', error);
-  }
+function getMeEndpoint() {
+  const configured = import.meta.env.VITE_AI_API_URL || '/api/ai';
+  return configured.replace(/\/ai\/?$/, '/me');
 }
 
 export function useSubscription() {
-  const [state, setState] = useState(readState);
-  const isPro = state.plan === 'Pro';
-  const remainingQueries = isPro ? Infinity : Math.max(0, FREE_LIMIT - state.aiQueries);
-  const limitReached = !isPro && state.aiQueries >= FREE_LIMIT;
+  const [quota, setQuota] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  const consumeAiQuery = useCallback(() => {
-    let consumed = false;
+  const refresh = useCallback(async () => {
+    try {
+      const supabase = getSupabaseClient();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-    setState((current) => {
-      const normalized = sanitizeState(current);
-
-      if (normalized.plan !== 'Pro' && normalized.aiQueries >= FREE_LIMIT) {
-        return normalized;
+      if (!session?.access_token) {
+        setQuota(null);
+        return;
       }
 
-      consumed = true;
+      const response = await fetch(getMeEndpoint(), {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
 
-      const next = {
-        ...normalized,
-        aiQueries: normalized.plan === 'Pro' ? normalized.aiQueries : normalized.aiQueries + 1,
-      };
+      if (response.status === 401) {
+        setQuota(null);
+        return;
+      }
 
-      persistState(next);
-      return next;
-    });
+      if (!response.ok) {
+        console.warn('[subscription] Quota endpoint returned', response.status);
+        return;
+      }
 
-    return consumed;
+      const nextQuota = await response.json();
+
+      if (
+        !nextQuota ||
+        !['Free', 'Pro'].includes(nextQuota.plan) ||
+        !Number.isInteger(nextQuota.used) ||
+        nextQuota.used < 0 ||
+        !Number.isInteger(nextQuota.limit) ||
+        nextQuota.limit <= 0 ||
+        !Number.isInteger(nextQuota.remaining) ||
+        nextQuota.remaining < 0
+      ) {
+        console.warn('[subscription] Invalid quota payload received.');
+        return;
+      }
+
+      setQuota(nextQuota);
+    } catch (error) {
+      console.warn('[subscription] No se pudo leer la cuota.', error);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  return useMemo(
-    () => ({
-      plan: state.plan,
-      isPro,
-      aiQueries: state.aiQueries,
-      aiLimit: isPro ? Infinity : FREE_LIMIT,
-      remainingQueries,
-      limitReached,
-      consumeAiQuery,
-    }),
-    [state.plan, state.aiQueries, isPro, remainingQueries, limitReached, consumeAiQuery],
-  );
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    const onFocus = () => refresh();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [refresh]);
+
+  useEffect(() => {
+    const onQuotaChanged = () => refresh();
+    window.addEventListener('economia:quota-changed', onQuotaChanged);
+    return () => window.removeEventListener('economia:quota-changed', onQuotaChanged);
+  }, [refresh]);
+
+  const isPro = quota?.plan === 'Pro';
+  const remainingQueries = quota?.remaining ?? FREE_LIMIT;
+  const limitReached = Boolean(quota) && remainingQueries <= 0;
+
+  return {
+    loading,
+    plan: quota?.plan ?? 'Free',
+    isPro,
+    aiQueries: quota?.used ?? 0,
+    aiLimit: quota?.limit ?? FREE_LIMIT,
+    remainingQueries,
+    limitReached,
+    refresh,
+  };
 }
