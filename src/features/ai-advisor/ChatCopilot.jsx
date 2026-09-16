@@ -14,7 +14,7 @@ export default function ChatCopilot({ userProfile, recentTickets, initialPrompt 
   const messagesEndRef = useRef(null);
   const requestInFlightRef = useRef(false);
   const consumedPromptRef = useRef('');
-  const { isPro, remainingQueries, limitReached, refresh } = useSubscription();
+  const { isPro, remainingQueries, limitReached, billing, refresh } = useSubscription();
 
   const quickPrompts = [
     { label: '¿Estoy gastando demasiado?', query: '¿Estoy gastando demasiado en gastos fijos?' },
@@ -100,12 +100,12 @@ export default function ChatCopilot({ userProfile, recentTickets, initialPrompt 
     setMessages([{ id: `reset_${Date.now()}`, role: 'assistant', text: `Historial reiniciado. ¿En qué te ayudo a ahorrar hoy, ${userProfile.name.split(' ')[0]}?`, timestamp: new Date() }]);
   };
 
-  const usageLabel = isPro ? `Plan Pro · ${remainingQueries} consultas disponibles este mes` : `Plan Free · ${remainingQueries} consulta${remainingQueries === 1 ? '' : 's'} restante${remainingQueries === 1 ? '' : 's'}`;
+  const usageLabel = isPro ? `Plan Pro · ${remainingQueries} consultas/mes de protección antiabuso` : `Plan Free · ${remainingQueries} consulta${remainingQueries === 1 ? '' : 's'} restante${remainingQueries === 1 ? '' : 's'}`;
 
   return (
     <div className="flex h-[calc(100vh-140px)] min-h-[500px] flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/90 shadow-xl">
       <div className="border-b border-slate-800 bg-slate-950/80 px-4 py-3"><div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2.5"><div className="flex h-8 w-8 items-center justify-center rounded-lg border border-sky-500/30 bg-sky-500/20 text-sky-400"><Bot className="h-5 w-5" /></div><div><div className="flex items-center gap-1.5"><span className="text-sm font-bold text-white">ECONOM-IA Copiloto</span><span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" /></div><p className="text-[10px] text-slate-400">Contexto activo: {userProfile.ciudad} · {usageLabel}</p></div></div><button type="button" onClick={resetChat} className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-800 hover:text-slate-200" title="Reiniciar conversación"><RefreshCw className="h-4 w-4" /></button></div></div>
-      <UpgradeBanner remainingQueries={remainingQueries} isPro={isPro} />
+      <UpgradeBanner remainingQueries={remainingQueries} isPro={isPro} billing={billing} onBillingChanged={() => refresh()} />
       <div className="flex-1 space-y-4 overflow-y-auto p-4">
         {messages.map((msg) => { const isUser = msg.role === 'user'; return <div key={msg.id} className={`flex items-start gap-2.5 ${isUser ? 'flex-row-reverse' : ''}`}><div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${isUser ? 'bg-sky-500 text-slate-950' : 'border border-slate-700 bg-slate-800 text-sky-400'}`}>{isUser ? <User className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}</div><div className={`max-w-[85%] rounded-2xl px-4 py-3 text-xs leading-relaxed sm:text-sm ${isUser ? 'bg-gradient-to-r from-sky-600 to-cyan-600 text-white' : 'border border-slate-800 bg-slate-950 text-slate-200'}`}><div className="space-y-1.5 whitespace-pre-line">{msg.text.split('\n').map((line, index) => <p key={index}>{line}</p>)}</div>{!isUser && <div className="mt-2 flex items-center justify-between gap-2 border-t border-slate-800/60 pt-2 text-[10px] text-slate-400"><span className="font-mono">{msg.timestamp?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span><div className="flex items-center gap-1.5"><button type="button" onClick={() => handleSpeak(msg.id, msg.text)}>{speakingId === msg.id ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}</button><button type="button" onClick={() => handleCopy(msg.id, msg.text)}>{copiedId === msg.id ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}</button></div></div>}</div></div>; })}
         {isLoading && <div className="flex items-start gap-2.5"><div className="flex h-8 w-8 items-center justify-center rounded-xl border border-slate-700 bg-slate-800 text-sky-400"><Bot className="h-4 w-4 animate-spin" /></div><div className="rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3 text-xs text-slate-300">La IA está analizando tus datos...</div></div>}
