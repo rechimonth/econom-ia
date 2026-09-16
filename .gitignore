@@ -22,3 +22,7 @@ dist/
 
 # Supabase CLI local link state
 supabase/.temp/
+
+# Tauri generated artifacts
+src-tauri/target/
+src-tauri/gen/
