@@ -60,18 +60,46 @@ function buildModelInput({ prompt, financialSummary, chatHistory }) {
 
 export async function readQuota(userId, usageMonth = getCurrentUsageMonth()) {
   const [{ data: subscription, error: subscriptionError }, { data: usage, error: usageError }] = await Promise.all([
-    supabaseAdmin.from('subscriptions').select('plan, status, current_period_end').eq('user_id', userId).maybeSingle(),
-    supabaseAdmin.from('ai_usage').select('query_count').eq('user_id', userId).eq('usage_month', usageMonth).maybeSingle(),
+    supabaseAdmin
+      .from('subscriptions')
+      .select('plan, status, current_period_end, stripe_customer_id, stripe_subscription_id, stripe_price_id, billing_currency, billing_unit_amount, billing_interval, cancel_at_period_end')
+      .eq('user_id', userId)
+      .maybeSingle(),
+    supabaseAdmin
+      .from('ai_usage')
+      .select('query_count')
+      .eq('user_id', userId)
+      .eq('usage_month', usageMonth)
+      .maybeSingle(),
   ]);
+
   if (subscriptionError || usageError) throw subscriptionError || usageError;
 
   const isPro = subscription?.plan === 'Pro'
-    && ['active', 'trialing'].includes(subscription?.status)
+    && ['active', 'trialing', 'past_due'].includes(subscription?.status)
     && Boolean(subscription?.current_period_end)
     && new Date(subscription.current_period_end) > new Date();
+
   const used = Math.max(0, Number(usage?.query_count) || 0);
   const limit = isPro ? PRO_AI_MONTHLY_LIMIT : FREE_AI_LIMIT;
-  return { plan: isPro ? 'Pro' : 'Free', used, limit, remaining: Math.max(0, limit - used), usageMonth };
+
+  return {
+    plan: isPro ? 'Pro' : 'Free',
+    used,
+    limit,
+    remaining: Math.max(0, limit - used),
+    usageMonth,
+    billing: {
+      customerConfigured: Boolean(subscription?.stripe_customer_id),
+      subscriptionConfigured: Boolean(subscription?.stripe_subscription_id),
+      priceId: subscription?.stripe_price_id || null,
+      currency: subscription?.billing_currency || null,
+      unitAmount: subscription?.billing_unit_amount ?? null,
+      interval: subscription?.billing_interval || null,
+      currentPeriodEnd: subscription?.current_period_end || null,
+      cancelAtPeriodEnd: Boolean(subscription?.cancel_at_period_end),
+    },
+  };
 }
 
 async function refundQuota(userId, usageMonth) {
