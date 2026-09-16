@@ -71,7 +71,6 @@ export async function readQuota(userId, usageMonth = getCurrentUsageMonth()) {
     && new Date(subscription.current_period_end) > new Date();
   const used = Math.max(0, Number(usage?.query_count) || 0);
   const limit = isPro ? PRO_AI_MONTHLY_LIMIT : FREE_AI_LIMIT;
-
   return { plan: isPro ? 'Pro' : 'Free', used, limit, remaining: Math.max(0, limit - used), usageMonth };
 }
 
@@ -83,13 +82,12 @@ async function refundQuota(userId, usageMonth) {
 export async function aiController(req, res) {
   let quotaConsumed = false;
   let providerSucceeded = false;
-  let usageMonth = getCurrentUsageMonth();
+  const usageMonth = getCurrentUsageMonth();
 
   try {
     const prompt = validatePrompt(req.body?.prompt);
     const financialSummary = parseFinancialSummary(req.body?.financialSummary);
     const chatHistory = parseChatHistory(req.body?.chatHistory);
-    usageMonth = getCurrentUsageMonth();
 
     const { data: quotaAllowed, error: quotaError } = await supabaseAdmin.rpc('increment_ai_quota', { p_user_id: req.user_id, p_usage_month: usageMonth });
     if (quotaError) {
@@ -110,7 +108,13 @@ export async function aiController(req, res) {
     if (!text) throw new Error('EMPTY_LLM_RESPONSE');
     providerSucceeded = true;
 
-    const quota = await readQuota(req.user_id, usageMonth);
+    let quota = null;
+    try {
+      quota = await readQuota(req.user_id, usageMonth);
+    } catch (quotaReadError) {
+      console.error('[ai] Response succeeded but quota read failed:', quotaReadError);
+    }
+
     return res.status(200).json({ text, quota });
   } catch (error) {
     if (quotaConsumed && !providerSucceeded) await refundQuota(req.user_id, usageMonth);
