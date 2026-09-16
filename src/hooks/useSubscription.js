@@ -42,6 +42,7 @@ export function useSubscription() {
       }
 
       const nextQuota = await response.json();
+      const billing = nextQuota?.billing;
 
       if (
         !nextQuota ||
@@ -51,15 +52,17 @@ export function useSubscription() {
         !Number.isInteger(nextQuota.limit) ||
         nextQuota.limit <= 0 ||
         !Number.isInteger(nextQuota.remaining) ||
-        nextQuota.remaining < 0
+        nextQuota.remaining < 0 ||
+        !billing ||
+        typeof billing.cancelAtPeriodEnd !== 'boolean'
       ) {
-        console.warn('[subscription] Invalid quota payload received.');
+        console.warn('[subscription] Invalid quota/billing payload received.');
         return;
       }
 
       setQuota(nextQuota);
     } catch (error) {
-      console.warn('[subscription] No se pudo leer la cuota.', error);
+      console.warn('[subscription] No se pudo leer la cuota y billing.', error);
     } finally {
       setLoading(false);
     }
@@ -93,6 +96,7 @@ export function useSubscription() {
     aiLimit: quota?.limit ?? FREE_LIMIT,
     remainingQueries,
     limitReached,
+    billing: quota?.billing ?? null,
     refresh,
   };
 }
