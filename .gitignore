@@ -14,7 +14,11 @@
 .externalNativeBuild
 .cxx
 local.properties
+env
 .env
+.env.*
+!.env.example
+!.env.*.example
 debug.keystore
 node_modules/
 dist/
