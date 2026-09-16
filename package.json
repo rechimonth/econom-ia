@@ -3,10 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "vite --port 3000 --host 0.0.0.0",
+    "dev": "vite --port 3000 --host 127.0.0.1",
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "tauri:prepare-icons": "tauri icon src-tauri/icons/source.svg",
     "server:dev": "npm --prefix server run dev",
     "server:start": "npm --prefix server run start",
     "local:start": "bash scripts/start-local.sh",
