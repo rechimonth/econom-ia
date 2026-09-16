@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { authMiddleware } from './middleware/authMiddleware.js';
 import { aiController } from './controllers/aiController.js';
+import { meController } from './controllers/meController.js';
 
 const app = express();
 const port = Number(process.env.PORT || 8787);
@@ -15,7 +16,10 @@ const allowedOrigins = (process.env.FRONTEND_ORIGINS || 'http://localhost:3000')
   .filter(Boolean);
 
 app.disable('x-powered-by');
-app.set('trust proxy', 1);
+
+if (process.env.TRUST_PROXY === 'true') {
+  app.set('trust proxy', 1);
+}
 
 app.use(helmet());
 
@@ -30,15 +34,29 @@ app.use(
     },
     methods: ['GET', 'POST', 'OPTIONS'],
     allowedHeaders: ['Authorization', 'Content-Type'],
-    credentials: true,
+    credentials: false,
   }),
 );
 
 app.use(express.json({ limit: '64kb' }));
 
-const aiRateLimiter = rateLimit({
+const ipLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 60,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: {
+    error: 'RATE_LIMITED',
+    message: 'Too many requests. Please try again later.',
+  },
+});
+
+const perUserAiLimiter = rateLimit({
   windowMs: 60_000,
   limit: 10,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user_id,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   message: {
@@ -47,11 +65,23 @@ const aiRateLimiter = rateLimit({
   },
 });
 
-app.get('/health', (_req, res) => {
+const healthLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 30,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: {
+    error: 'RATE_LIMITED',
+    message: 'Too many health checks.',
+  },
+});
+
+app.get('/health', healthLimiter, (_req, res) => {
   res.status(200).json({ status: 'ok' });
 });
 
-app.post('/api/ai', aiRateLimiter, authMiddleware, aiController);
+app.get('/api/me', ipLimiter, authMiddleware, meController);
+app.post('/api/ai', ipLimiter, authMiddleware, perUserAiLimiter, aiController);
 
 app.use((error, _req, res, _next) => {
   if (error?.message === 'CORS_ORIGIN_NOT_ALLOWED') {
