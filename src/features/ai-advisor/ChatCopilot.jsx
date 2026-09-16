@@ -1,47 +1,22 @@
-import React, { useRef, useState } from 'react';
-import {
-  Bot,
-  Check,
-  Copy,
-  Crown,
-  Mic,
-  MicOff,
-  RefreshCw,
-  Send,
-  Sparkles,
-  User,
-  Volume2,
-  VolumeX,
-} from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Bot, Check, Copy, Crown, Mic, MicOff, RefreshCw, Send, Sparkles, User, Volume2, VolumeX } from 'lucide-react';
 import { askEconomicCopilot, AiApiError } from '../../services/ai/aiCopilot';
 import UpgradeBanner from '../../components/ui/UpgradeBanner';
 import { useSubscription } from '../../hooks/useSubscription';
 
-export default function ChatCopilot({
-  userProfile,
-  recentTickets,
-  initialPrompt = '',
-}) {
+export default function ChatCopilot({ userProfile, recentTickets, initialPrompt = '', onPromptConsumed }) {
   const [messages, setMessages] = useState([
-    {
-      id: 'welcome',
-      role: 'assistant',
-      text: `¡Hola ${userProfile.name.split(' ')[0]}! 👋 Soy **ECONOM-IA**, tu copiloto económico para Argentina.\n\nTe ayudo a:\n- 🛒 Encontrar dónde comprar más barato\n- 📊 Analizar tus ingresos y gastos\n- 📈 Entender tu inflación de bolsillo\n- 💳 Comparar cuotas y contado\n\n¿En qué te puedo asesorar hoy?`,
-      timestamp: new Date(),
-    },
+    { id: 'welcome', role: 'assistant', text: `¡Hola ${userProfile.name.split(' ')[0]}! 👋 Soy **ECONOM-IA**, tu copiloto económico para Argentina.\n\nTe ayudo a:\n- 🛒 Encontrar dónde comprar más barato\n- 📊 Analizar tus ingresos y gastos\n- 📈 Entender tu inflación de bolsillo\n- 💳 Comparar cuotas y contado\n\n¿En qué te puedo asesorar hoy?`, timestamp: new Date() },
   ]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [speakingId, setSpeakingId] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
-  const [serverQuotaExceeded, setServerQuotaExceeded] = useState(false);
   const messagesEndRef = useRef(null);
   const requestInFlightRef = useRef(false);
-  const { isPro, remainingQueries, limitReached, consumeAiQuery } = useSubscription();
-
-  const effectiveLimitReached = limitReached || serverQuotaExceeded;
-  const effectiveRemainingQueries = serverQuotaExceeded ? 0 : remainingQueries;
+  const consumedPromptRef = useRef('');
+  const { isPro, remainingQueries, limitReached, refresh } = useSubscription();
 
   const quickPrompts = [
     { label: '¿Estoy gastando demasiado?', query: '¿Estoy gastando demasiado en gastos fijos?' },
@@ -51,83 +26,43 @@ export default function ChatCopilot({
     { label: 'Chino vs mayorista', query: '¿Qué productos conviene comprar en el chino y cuáles en el mayorista?' },
   ];
 
-  React.useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isLoading]);
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, isLoading]);
 
-  React.useEffect(() => {
-    if (initialPrompt && initialPrompt.trim()) {
-      handleSendMessage(initialPrompt);
-    }
-  }, [initialPrompt]);
+  useEffect(() => {
+    const prompt = initialPrompt?.trim();
+    if (!prompt || consumedPromptRef.current === prompt) return;
+    consumedPromptRef.current = prompt;
+    void handleSendMessage(prompt);
+    onPromptConsumed?.();
+  }, [initialPrompt, onPromptConsumed]);
 
   const handleSendMessage = async (customText = null) => {
     const textToSend = String(customText ?? inputText).trim();
-
-    if (
-      !textToSend ||
-      isLoading ||
-      requestInFlightRef.current ||
-      effectiveLimitReached
-    ) {
-      return;
-    }
+    if (!textToSend || isLoading || requestInFlightRef.current || limitReached) return;
 
     requestInFlightRef.current = true;
     setInputText('');
     setIsLoading(true);
-
-    const userMessage = {
-      id: `user_${Date.now()}`,
-      role: 'user',
-      text: textToSend,
-      timestamp: new Date(),
-    };
-
-    setMessages((current) => [...current, userMessage]);
+    setMessages((current) => [...current, { id: `user_${Date.now()}`, role: 'user', text: textToSend, timestamp: new Date() }]);
 
     try {
-      const replyText = await askEconomicCopilot({
-        prompt: textToSend,
-        userProfile,
-        recentTickets,
-        chatHistory: messages,
-      });
-
-      setMessages((current) => [
-        ...current,
-        {
-          id: `ai_${Date.now()}`,
-          role: 'assistant',
-          text: replyText,
-          timestamp: new Date(),
-        },
-      ]);
-
-      if (!consumeAiQuery()) {
-        console.warn('[subscription] AI response succeeded, but local usage state rejected the consumption.');
-      }
+      const replyText = await askEconomicCopilot({ prompt: textToSend, userProfile, recentTickets, chatHistory: messages });
+      setMessages((current) => [...current, { id: `ai_${Date.now()}`, role: 'assistant', text: replyText, timestamp: new Date() }]);
+      await refresh();
+      window.dispatchEvent(new Event('economia:quota-changed'));
     } catch (error) {
       console.error(error);
+      if (error instanceof AiApiError && ['AI_QUOTA_EXCEEDED', 'AUTH_REQUIRED', 'AUTH_INVALID'].includes(error.code)) await refresh();
 
-      if (error instanceof AiApiError && error.code === 'AI_QUOTA_EXCEEDED') {
-        setServerQuotaExceeded(true);
-      }
+      const text = error instanceof AiApiError && ['AUTH_REQUIRED', 'AUTH_INVALID'].includes(error.code)
+        ? 'Tu sesión expiró. Iniciá sesión nuevamente para continuar.'
+        : error instanceof AiApiError && error.code === 'AI_QUOTA_EXCEEDED'
+          ? 'Alcanzaste el límite mensual disponible para tu plan. Revisá los planes Pro para continuar.'
+          : error instanceof AiApiError && error.code === 'AI_RATE_LIMITED'
+            ? 'Se alcanzó el límite temporal de solicitudes. Esperá unos segundos y probá nuevamente.'
+            : 'Hubo un error al consultar el asistente. Probá nuevamente en unos segundos.';
 
-      setMessages((current) => [
-        ...current,
-        {
-          id: `err_${Date.now()}`,
-          role: 'assistant',
-          text:
-            error instanceof AiApiError && error.code === 'AUTH_REQUIRED'
-              ? 'Tu sesión expiró. Iniciá sesión nuevamente para continuar.'
-              : error instanceof AiApiError && error.code === 'AI_QUOTA_EXCEEDED'
-                ? 'Alcanzaste el límite mensual de consultas Free. Revisá los planes Pro para continuar.'
-                : 'Hubo un error al consultar el asistente. Probá nuevamente en unos segundos.',
-          timestamp: new Date(),
-        },
-      ]);
+      setMessages((current) => [...current, { id: `err_${Date.now()}`, role: 'assistant', text, timestamp: new Date() }]);
     } finally {
       requestInFlightRef.current = false;
       setIsLoading(false);
@@ -146,16 +81,9 @@ export default function ChatCopilot({
 
   const handleSpeak = (id, text) => {
     if (!('speechSynthesis' in window)) return;
-
-    if (speakingId === id) {
-      window.speechSynthesis.cancel();
-      setSpeakingId(null);
-      return;
-    }
-
+    if (speakingId === id) { window.speechSynthesis.cancel(); setSpeakingId(null); return; }
     window.speechSynthesis.cancel();
-    const cleanText = text.replace(/[*_#`]/g, '').replace(/[\u{1F300}-\u{1F9FF}]/gu, '');
-    const utterance = new SpeechSynthesisUtterance(cleanText);
+    const utterance = new SpeechSynthesisUtterance(text.replace(/[*_#`]/g, '').replace(/[\u{1F300}-\u{1F9FF}]/gu, ''));
     utterance.lang = 'es-AR';
     utterance.rate = 1.05;
     utterance.onend = () => setSpeakingId(null);
@@ -165,162 +93,53 @@ export default function ChatCopilot({
   };
 
   const toggleMic = () => {
-    if (effectiveLimitReached || isLoading) return;
-
+    if (limitReached || isLoading) return;
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
       setIsListening(true);
-      window.setTimeout(() => {
-        setIsListening(false);
-        setInputText('¿Dónde consigo azúcar más barata cerca?');
-      }, 1200);
+      window.setTimeout(() => { setIsListening(false); setInputText('¿Dónde consigo azúcar más barata cerca?'); }, 1200);
       return;
     }
-
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
     recognition.lang = 'es-AR';
     recognition.continuous = false;
     recognition.interimResults = false;
-
-    if (isListening) {
-      recognition.stop();
-      setIsListening(false);
-      return;
-    }
-
+    if (isListening) { recognition.stop(); setIsListening(false); return; }
     setIsListening(true);
     recognition.start();
-    recognition.onresult = (event) => {
-      setInputText(event.results[0][0].transcript);
-      setIsListening(false);
-    };
+    recognition.onresult = (event) => { setInputText(event.results[0][0].transcript); setIsListening(false); };
     recognition.onerror = () => setIsListening(false);
     recognition.onend = () => setIsListening(false);
   };
 
   const resetChat = () => {
     window.speechSynthesis?.cancel();
-    setMessages([
-      {
-        id: `reset_${Date.now()}`,
-        role: 'assistant',
-        text: `Historial reiniciado. ¿En qué te ayudo a ahorrar hoy, ${userProfile.name.split(' ')[0]}?`,
-        timestamp: new Date(),
-      },
-    ]);
+    setMessages([{ id: `reset_${Date.now()}`, role: 'assistant', text: `Historial reiniciado. ¿En qué te ayudo a ahorrar hoy, ${userProfile.name.split(' ')[0]}?`, timestamp: new Date() }]);
   };
 
-  const usageLabel = isPro
-    ? 'Plan Pro · IA sin límite'
-    : `Plan Free · ${effectiveRemainingQueries} consulta${effectiveRemainingQueries === 1 ? '' : 's'} restante${effectiveRemainingQueries === 1 ? '' : 's'}`;
+  const usageLabel = isPro ? `Plan Pro · ${remainingQueries} consultas disponibles este mes` : `Plan Free · ${remainingQueries} consulta${remainingQueries === 1 ? '' : 's'} restante${remainingQueries === 1 ? '' : 's'}`;
 
   return (
     <div className="flex h-[calc(100vh-140px)] min-h-[500px] flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/90 shadow-xl">
-      <div className="border-b border-slate-800 bg-slate-950/80 px-4 py-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-sky-500/30 bg-sky-500/20 text-sky-400">
-              <Bot className="h-5 w-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-sm font-bold text-white">ECONOM-IA Copiloto</span>
-                <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
-              </div>
-              <p className="text-[10px] text-slate-400">Contexto activo: {userProfile.ciudad} · {usageLabel}</p>
-            </div>
-          </div>
-          <button type="button" onClick={resetChat} className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-800 hover:text-slate-200" title="Reiniciar conversación">
-            <RefreshCw className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
+      <div className="border-b border-slate-800 bg-slate-950/80 px-4 py-3"><div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2.5"><div className="flex h-8 w-8 items-center justify-center rounded-lg border border-sky-500/30 bg-sky-500/20 text-sky-400"><Bot className="h-5 w-5" /></div><div><div className="flex items-center gap-1.5"><span className="text-sm font-bold text-white">ECONOM-IA Copiloto</span><span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" /></div><p className="text-[10px] text-slate-400">Contexto activo: {userProfile.ciudad} · {usageLabel}</p></div></div><button type="button" onClick={resetChat} className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-800 hover:text-slate-200" title="Reiniciar conversación"><RefreshCw className="h-4 w-4" /></button></div></div>
 
-      {!isPro && <UpgradeBanner remainingQueries={effectiveRemainingQueries} />}
+      <UpgradeBanner remainingQueries={remainingQueries} />
 
       <div className="flex-1 space-y-4 overflow-y-auto p-4">
         {messages.map((msg) => {
           const isUser = msg.role === 'user';
-          const formattedLines = msg.text.split('\n');
-
-          return (
-            <div key={msg.id} className={`flex items-start gap-2.5 ${isUser ? 'flex-row-reverse' : ''}`}>
-              <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${isUser ? 'bg-sky-500 text-slate-950' : 'border border-slate-700 bg-slate-800 text-sky-400'}`}>
-                {isUser ? <User className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
-              </div>
-
-              <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-xs leading-relaxed sm:text-sm ${isUser ? 'bg-gradient-to-r from-sky-600 to-cyan-600 text-white' : 'border border-slate-800 bg-slate-950 text-slate-200'}`}>
-                <div className="space-y-1.5 whitespace-pre-line">
-                  {formattedLines.map((line, index) => {
-                    const segments = line.split(/(\*\*.*?\*\*)/g);
-                    return (
-                      <p key={index} className={line.startsWith('-') || line.startsWith('•') ? 'pl-2 text-slate-300' : ''}>
-                        {segments.map((segment, segmentIndex) => {
-                          if (segment.startsWith('**') && segment.endsWith('**')) {
-                            return <strong key={segmentIndex}>{segment.slice(2, -2)}</strong>;
-                          }
-                          return <React.Fragment key={segmentIndex}>{segment}</React.Fragment>;
-                        })}
-                      </p>
-                    );
-                  })}
-                </div>
-
-                {!isUser && (
-                  <div className="mt-2 flex items-center justify-between gap-2 border-t border-slate-800/60 pt-2 text-[10px] text-slate-400">
-                    <span className="font-mono">{msg.timestamp?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                    <div className="flex items-center gap-1.5">
-                      <button type="button" onClick={() => handleSpeak(msg.id, msg.text)} className="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-sky-400" title="Escuchar respuesta">
-                        {speakingId === msg.id ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
-                      </button>
-                      <button type="button" onClick={() => handleCopy(msg.id, msg.text)} className="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-white" title="Copiar respuesta">
-                        {copiedId === msg.id ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          );
+          return <div key={msg.id} className={`flex items-start gap-2.5 ${isUser ? 'flex-row-reverse' : ''}`}><div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${isUser ? 'bg-sky-500 text-slate-950' : 'border border-slate-700 bg-slate-800 text-sky-400'}`}>{isUser ? <User className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}</div><div className={`max-w-[85%] rounded-2xl px-4 py-3 text-xs leading-relaxed sm:text-sm ${isUser ? 'bg-gradient-to-r from-sky-600 to-cyan-600 text-white' : 'border border-slate-800 bg-slate-950 text-slate-200'}`}><div className="space-y-1.5 whitespace-pre-line">{msg.text.split('\n').map((line, index) => <p key={index}>{line.split(/(\*\*.*?\*\*)/g).map((segment, segmentIndex) => segment.startsWith('**') && segment.endsWith('**') ? <strong key={segmentIndex}>{segment.slice(2, -2)}</strong> : <React.Fragment key={segmentIndex}>{segment}</React.Fragment>)}</p>)}</div>{!isUser && <div className="mt-2 flex items-center justify-between gap-2 border-t border-slate-800/60 pt-2 text-[10px] text-slate-400"><span className="font-mono">{msg.timestamp?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span><div className="flex items-center gap-1.5"><button type="button" onClick={() => handleSpeak(msg.id, msg.text)}>{speakingId === msg.id ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}</button><button type="button" onClick={() => handleCopy(msg.id, msg.text)}>{copiedId === msg.id ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}</button></div></div>}</div></div>;
         })}
-
-        {isLoading && (
-          <div className="flex items-start gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-xl border border-slate-700 bg-slate-800 text-sky-400">
-              <Bot className="h-4 w-4 animate-spin" />
-            </div>
-            <div className="flex items-center gap-2 rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3 text-xs text-slate-300">
-              <span className="h-2 w-2 animate-bounce rounded-full bg-sky-400" />
-              <span className="h-2 w-2 animate-bounce rounded-full bg-cyan-400 [animation-delay:0.2s]" />
-              <span className="h-2 w-2 animate-bounce rounded-full bg-emerald-400 [animation-delay:0.4s]" />
-              <span>La IA está analizando tus datos...</span>
-            </div>
-          </div>
-        )}
-
+        {isLoading && <div className="flex items-start gap-2.5"><div className="flex h-8 w-8 items-center justify-center rounded-xl border border-slate-700 bg-slate-800 text-sky-400"><Bot className="h-4 w-4 animate-spin" /></div><div className="rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3 text-xs text-slate-300">La IA está analizando tus datos...</div></div>}
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="border-t border-slate-800/80 bg-slate-950/40 px-4 py-2">
-        <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
-          {quickPrompts.map((item) => (
-            <button key={item.query} type="button" onClick={() => handleSendMessage(item.query)} disabled={isLoading || effectiveLimitReached} className="whitespace-nowrap rounded-full border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs text-slate-300 transition hover:border-sky-500/40 hover:bg-sky-500/20 hover:text-sky-200 disabled:cursor-not-allowed disabled:opacity-40">
-              {item.label}
-            </button>
-          ))}
-        </div>
-      </div>
+      <div className="border-t border-slate-800/80 bg-slate-950/40 px-4 py-2"><div className="flex gap-1.5 overflow-x-auto no-scrollbar">{quickPrompts.map((item) => <button key={item.query} type="button" onClick={() => handleSendMessage(item.query)} disabled={isLoading || limitReached} className="whitespace-nowrap rounded-full border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs text-slate-300 disabled:cursor-not-allowed disabled:opacity-40">{item.label}</button>)}</div></div>
 
       <form onSubmit={(event) => { event.preventDefault(); handleSendMessage(); }} className="flex items-center gap-2 border-t border-slate-800 bg-slate-950 p-3">
-        <button type="button" onClick={toggleMic} disabled={effectiveLimitReached || isLoading} className={`rounded-xl border p-2.5 transition ${isListening ? 'animate-pulse border-rose-500 bg-rose-500/20 text-rose-400' : 'border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-700 hover:text-white'} disabled:cursor-not-allowed disabled:opacity-40`} title={isListening ? 'Escuchando...' : 'Hablar por micrófono'}>
-          {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-        </button>
-
-        <input type="text" value={inputText} onChange={(event) => setInputText(event.target.value)} disabled={effectiveLimitReached || isLoading} placeholder={effectiveLimitReached ? 'Límite Free alcanzado · revisá los planes Pro' : 'Consultá precios, sueldo, cuotas o inflación...'} className="flex-1 rounded-xl border border-slate-800 bg-slate-900 px-4 py-2.5 text-xs text-white outline-none transition placeholder:text-slate-500 focus:border-sky-500 disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm" />
-
-        <button type="submit" disabled={!inputText.trim() || isLoading || effectiveLimitReached} className="rounded-xl bg-gradient-to-r from-sky-500 to-cyan-500 p-2.5 font-bold text-slate-950 shadow-md shadow-sky-500/20 transition hover:from-sky-400 hover:to-cyan-400 disabled:cursor-not-allowed disabled:opacity-40" title={effectiveLimitReached ? 'Ver planes Pro para continuar' : 'Enviar consulta'}>
-          {effectiveLimitReached ? <Crown className="h-4 w-4" /> : <Send className="h-4 w-4" />}
-        </button>
+        <button type="button" onClick={toggleMic} disabled={limitReached || isLoading} className="rounded-xl border border-slate-800 bg-slate-900 p-2.5 text-slate-400 disabled:opacity-40">{isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}</button>
+        <input type="text" value={inputText} onChange={(event) => setInputText(event.target.value)} disabled={limitReached || isLoading} placeholder={limitReached ? 'Límite mensual alcanzado · revisá los planes Pro' : 'Consultá precios, sueldo, cuotas o inflación...'} className="flex-1 rounded-xl border border-slate-800 bg-slate-900 px-4 py-2.5 text-xs text-white outline-none focus:border-sky-500 disabled:opacity-50 sm:text-sm" />
+        <button type="submit" disabled={!inputText.trim() || isLoading || limitReached} className="rounded-xl bg-gradient-to-r from-sky-500 to-cyan-500 p-2.5 font-bold text-slate-950 disabled:opacity-40" title={limitReached ? 'Ver planes Pro para continuar' : 'Enviar consulta'}>{limitReached ? <Crown className="h-4 w-4" /> : <Send className="h-4 w-4" />}</button>
       </form>
     </div>
   );
