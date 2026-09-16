@@ -9,6 +9,15 @@ import { meController } from './controllers/meController.js';
 import { checkoutController, portalController, cancelController, resumeController } from './controllers/billingController.js';
 import { billingWebhookController } from './controllers/billingWebhookController.js';
 
+process.on('unhandledRejection', (reason) => {
+  console.error('[server] Unhandled promise rejection:', reason);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('[server] Uncaught exception, shutting down:', error);
+  process.exit(1);
+});
+
 const app = express();
 const port = Number(process.env.PORT || 8787);
 
